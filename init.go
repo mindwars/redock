@@ -20,7 +20,7 @@ var processes []string
 
 var answers []string
 
-var dockerRepo = "https://github.com/onuragtas/docker"
+var dockerRepo = "https://github.com/mindwars/docker"
 
 var dockerEnvironmentManager dockermanager.DockerEnvironmentManager
 
