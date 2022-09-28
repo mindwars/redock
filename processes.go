@@ -222,11 +222,11 @@ func selfUpdate() {
 	goos["linux"] = "Linux"
 	goos["windows"] = "Windows"
 
-	log.Println("https://github.com/onuragtas/redock/releases/latest/download/redock_"+goos[runtime.GOOS]+"_"+arch[runtime.GOARCH], "downloading...")
+	log.Println("https://github.com/mindwars/redock/releases/latest/download/redock_"+goos[runtime.GOOS]+"_"+arch[runtime.GOARCH], "downloading...")
 
 	var updater = &selfupdate.Updater{
 		CurrentVersion: "v1.0.0",
-		BinURL:         "https://github.com/onuragtas/redock/releases/latest/download/redock_" + goos[runtime.GOOS] + "_" + arch[runtime.GOARCH],
+		BinURL:         "https://github.com/mindwars/redock/releases/latest/download/redock_" + goos[runtime.GOOS] + "_" + arch[runtime.GOARCH],
 		Dir:            "update/",
 		CmdName:        "/docker-env",
 	}
