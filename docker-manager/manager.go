@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/onuragtas/docker-env/command"
 	"gopkg.in/yaml.v2"
-	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -12,7 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
+	"time"
 )
 
 type DockerEnvironmentManager struct {
@@ -79,8 +78,8 @@ func (t *DockerEnvironmentManager) Init() {
 	t.Virtualhost = NewVirtualHost(t)
 	t.command = command.Command{}
 	t.activeServices = make(map[int]bool)
-	envFile, err := ioutil.ReadFile(t.EnvDistPath)
-	_, envFileErr := ioutil.ReadFile(t.EnvPath)
+	_, err := ioutil.ReadFile(t.EnvDistPath)
+	envFile, envFileErr := ioutil.ReadFile(t.EnvPath)
 	t.Env = string(envFile)
 	if envFileErr == nil {
 		t.EnvDistPath = t.EnvPath
@@ -250,10 +249,11 @@ func (t *DockerEnvironmentManager) GetDomains(path string) []string {
 
 func (t *DockerEnvironmentManager) ExecBash(service string, domain string) {
 	c := command.Command{}
-	c.AddStdIn(1, func() {
-		_, _ = io.WriteString(os.Stdin, `export PHP_IDE_CONFIG="serverName=`+strings.ReplaceAll(domain, ".conf", "")+"\"")
-	})
-	c.RunWithPipe("docker", "exec", "-it", service, "bash")
+	cmd := `PHP_IDE_CONFIG=serverName=` + strings.ReplaceAll(domain, ".conf", "")
+	//c.AddStdIn(1, func() {
+	//	_, _ = io.WriteString(os.Stdin, `export PHP_IDE_CONFIG="serverName=`+strings.ReplaceAll(domain, ".conf", "")+"\"")
+	//})
+	c.RunWithPipe("docker", "exec", "-it", service, "env", cmd, "bash", "-l")
 }
 
 func (t *DockerEnvironmentManager) getLocalIP() string {
@@ -272,8 +272,6 @@ func (t *DockerEnvironmentManager) getLocalIP() string {
 
 			ip := networkIp.IP.String()
 
-			fmt.Println("Resolved Host IP: " + ip)
-
 			return ip
 		}
 	}
@@ -282,6 +280,10 @@ func (t *DockerEnvironmentManager) getLocalIP() string {
 func (t *DockerEnvironmentManager) RegenerateXDebugConf() {
 	c := command.Command{}
 	conf := fmt.Sprintf(xdebugConf, t.getLocalIP(), 10000) // todo hardcoded read .env
+	if ip, err := t.Virtualhost.getXDebugIp(); err == nil {
+		t.Env = strings.ReplaceAll(t.Env, "XDEBUG_HOST="+ip, "XDEBUG_HOST="+t.getLocalIP())
+		os.WriteFile(t.EnvPath, []byte(t.Env), 0644)
+	}
 
 	var phpServices []string
 
@@ -299,7 +301,7 @@ func (t *DockerEnvironmentManager) RegenerateXDebugConf() {
 }
 
 func (t *DockerEnvironmentManager) RestartAll() {
-	var wg sync.WaitGroup
+	//var wg sync.WaitGroup
 	c := command.Command{}
 
 	var phpServices []string
@@ -309,24 +311,35 @@ func (t *DockerEnvironmentManager) RestartAll() {
 			phpServices = append(phpServices, service)
 		}
 	}
-	wg.Add(len(phpServices) + 2)
+	//wg.Add(len(phpServices) + 2)
 
 	for _, service := range phpServices {
-		go func(wg *sync.WaitGroup, serviceName string) {
-			c.RunWithPipe("/usr/local/bin/docker", "restart", serviceName)
-			wg.Done()
-		}(&wg, service)
+		//go func(wg *sync.WaitGroup, serviceName string) {
+		c.RunWithPipe("/usr/local/bin/docker", "restart", service)
+		//	wg.Done()
+		//}(&wg, service)
 	}
 
-	go func(wg *sync.WaitGroup) {
-		c.RunWithPipe("/usr/local/bin/docker", "restart", "httpd")
-		wg.Done()
-	}(&wg)
+	//go func(wg *sync.WaitGroup) {
+	c.RunWithPipe("/usr/local/bin/docker", "restart", "httpd")
+	//wg.Done()
+	//}(&wg)
 
-	go func(wg *sync.WaitGroup) {
-		c.RunWithPipe("/usr/local/bin/docker", "restart", "nginx")
-		wg.Done()
-	}(&wg)
+	//go func(wg *sync.WaitGroup) {
+	c.RunWithPipe("/usr/local/bin/docker", "restart", "nginx")
+	//	wg.Done()
+	//}(&wg)
 
-	wg.Wait()
+	//wg.Wait()
+}
+
+func (t *DockerEnvironmentManager) CheckLocalIpAndRegenerate() {
+	for true {
+		localIp := t.getLocalIP()
+		if ip, err := t.Virtualhost.getXDebugIp(); err == nil && ip != localIp {
+			t.RegenerateXDebugConf()
+		}
+		time.Sleep(5 * time.Second)
+	}
+
 }
