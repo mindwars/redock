@@ -21,6 +21,7 @@ type DockerEnvironmentManager struct {
 	CopyStruct         map[string]interface{}
 	copyStruct         map[string]interface{}
 	Services           Services
+	ActiveServicesList Services
 	ActiveServices     []string
 	EnvDistPath        string
 	EnvPath            string
@@ -33,6 +34,8 @@ type DockerEnvironmentManager struct {
 	Virtualhost        *VirtualHost
 	HttpdConfPath      string
 	NginxConfPath      string
+	DevEnv             bool
+	Username           string
 }
 
 func Find(obj interface{}, key string) (interface{}, bool) {
@@ -103,6 +106,7 @@ func (t *DockerEnvironmentManager) Init() {
 				Links:         t.findLinks(value),
 				DependsOn:     t.findDependsOn(value),
 				Original:      value,
+				Image:         t.findImage(value),
 			})
 
 			t.activeServices[i] = t.isActive(key.(string))
@@ -112,8 +116,15 @@ func (t *DockerEnvironmentManager) Init() {
 
 	if obj, ok := Find(t.copyStruct, "services"); ok {
 		i := 0
-		for key := range obj.(map[interface{}]interface{}) {
+		for key, value := range obj.(map[interface{}]interface{}) {
 			t.ActiveServices = append(t.ActiveServices, key.(string))
+			t.ActiveServicesList = append(t.ActiveServicesList, Service{
+				ContainerName: key,
+				Links:         t.findLinks(value),
+				DependsOn:     t.findDependsOn(value),
+				Original:      value,
+				Image:         t.findImage(value),
+			})
 			i++
 		}
 	}
@@ -144,6 +155,13 @@ func (t *DockerEnvironmentManager) findDependsOn(value interface{}) []string {
 		}
 	}
 	return dependsOn
+}
+func (t *DockerEnvironmentManager) findImage(value interface{}) string {
+	var image string
+	if obj, ok := value.(map[interface{}]interface{})["image"]; ok {
+		image = obj.(string)
+	}
+	return image
 }
 
 func (t *DockerEnvironmentManager) CheckDepends(label string) (*Service, bool) {
@@ -211,8 +229,8 @@ func (t *DockerEnvironmentManager) GetActiveServices() map[int]bool {
 	return t.activeServices
 }
 
-func (t *DockerEnvironmentManager) AddVirtualHost(service, domain, folder, phpVersion string) {
-	t.Virtualhost.AddVirtualHost(service, domain, folder, phpVersion)
+func (t *DockerEnvironmentManager) AddVirtualHost(service, domain, folder, phpVersion, typeConf, proxyPassPort string, addHosts bool) {
+	t.Virtualhost.AddVirtualHost(service, domain, folder, phpVersion, typeConf, proxyPassPort, addHosts)
 }
 
 func (t *DockerEnvironmentManager) GetWorkDir() string {
@@ -226,10 +244,19 @@ func (t *DockerEnvironmentManager) getHomeDir() string {
 
 func (t *DockerEnvironmentManager) Restart(service string) {
 	if service == "nginx" {
-		t.command.RunCommand(t.GetWorkDir(), "docker-compose", "restart", "nginx")
+		if t.DevEnv {
+			t.command.RunCommand(t.GetWorkDir(), "docker", "-H", "192.168.36.240:4243", "exec", "-t", "nginx", "sh", "-c", "nginx -s reload")
+		} else {
+			t.command.RunCommand(t.GetWorkDir(), "docker-compose", "restart", "nginx")
+		}
 	} else {
-		t.command.RunCommand(t.GetWorkDir(), "docker-compose", "restart", "nginx")
-		t.command.RunCommand(t.GetWorkDir(), "docker-compose", "restart", "httpd")
+		if t.DevEnv {
+			t.command.RunCommand(t.GetWorkDir(), "docker", "-H", "192.168.36.240:4243", "exec", "-t", "nginx", "sh", "-c", "nginx -s reload")
+			t.command.RunCommand(t.GetWorkDir(), "docker", "-H", "192.168.36.240:4243", "exec", "-t", "httpd", "sh", "-c", "apache2ctl restart")
+		} else {
+			t.command.RunCommand(t.GetWorkDir(), "docker-compose", "restart", "nginx")
+			t.command.RunCommand(t.GetWorkDir(), "docker-compose", "restart", "httpd")
+		}
 	}
 }
 
@@ -268,6 +295,10 @@ func (t *DockerEnvironmentManager) getLocalIP() string {
 
 		networkIp, ok := netInterfaceAddress.(*net.IPNet)
 
+		if t.DevEnv && !strings.Contains(networkIp.IP.String(), "172.28") {
+			continue
+		}
+
 		if ok && !networkIp.IP.IsLoopback() && networkIp.IP.To4() != nil {
 
 			ip := networkIp.IP.String()
@@ -294,6 +325,11 @@ func (t *DockerEnvironmentManager) RegenerateXDebugConf() {
 	}
 
 	for _, service := range phpServices {
+		if strings.Contains(service, "81") {
+			conf = fmt.Sprintf(xdebugConf8, t.getLocalIP(), 10000)
+		} else {
+			conf = fmt.Sprintf(xdebugConf, t.getLocalIP(), 10000)
+		}
 		c.RunWithPipe("/usr/local/bin/docker", "exec", "-it", service, "bash", "-c", `echo "`+conf+`" > /usr/local/etc/php/conf.d/xdebug.ini`)
 	}
 

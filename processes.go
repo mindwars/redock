@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/AlecAivazis/survey/v2"
+	"gopkg.in/src-d/go-git.v4"
+	"gopkg.in/src-d/go-git.v4/plumbing"
 	"io/fs"
 	"io/ioutil"
 	"log"
@@ -12,7 +15,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/AlecAivazis/survey/v2"
 	"github.com/kardianos/osext"
 	"github.com/onuragtas/docker-env/command"
 	"github.com/onuragtas/docker-env/selfupdate"
@@ -33,6 +35,8 @@ func addVirtualHost() {
 	var domain string
 	var folder string
 	var phpService string
+	var typeConf string
+	var proxyPass string
 
 	service = pickService()
 
@@ -42,16 +46,24 @@ func addVirtualHost() {
 		log.Println(err)
 	}
 
-	inputBox = &survey.Input{Message: "Folder:"}
-	err = survey.AskOne(inputBox, &folder)
-	if err != nil {
-		log.Println(err)
+	typeConf = selectTypeConf()
+
+	if typeConf == "Default" {
+
+		inputBox = &survey.Input{Message: "Folder:"}
+		err = survey.AskOne(inputBox, &folder)
+		if err != nil {
+			log.Println(err)
+		}
+
+		phpService = selectPhpServices()
+
+	} else {
+		proxyPass = ask("Proxy Pass Port:")
 	}
 
-	phpService = selectPhpServices()
-
 	fmt.Println(domain)
-	dockerEnvironmentManager.AddVirtualHost(service, domain, folder, phpService)
+	dockerEnvironmentManager.AddVirtualHost(service, domain, folder, phpService, typeConf, proxyPass, true)
 }
 
 func editVirtualHost() {
@@ -64,7 +76,7 @@ func editVirtualHost() {
 	domains = dockerEnvironmentManager.GetDomains(dockerEnvironmentManager.Virtualhost.GetConfigPath(service))
 	domains = append(domains, "Quit")
 
-	selectBox := &survey.Select{Message: "Pick your domain", Options: domains, PageSize: 50}
+	selectBox := &survey.Select{Message: "Pick your domain", Options: domains, PageSize: 10}
 	err := survey.AskOne(selectBox, &domain)
 	if err != nil {
 		log.Println(err)
@@ -211,22 +223,61 @@ func importVirtualHosts() {
 	}
 }
 
+func dockerUpdate() {
+	_, err := git.PlainClone(getHomeDir()+"/.docker-environment", false, &git.CloneOptions{
+		URL:      dockerRepo,
+		Progress: os.Stdout,
+	})
+	if err != nil && err.Error() != git.ErrRepositoryAlreadyExists.Error() {
+		panic(err)
+	}
+
+	r, err := git.PlainOpen(getHomeDir() + "/.docker-environment")
+	if err != nil {
+		log.Print(err)
+	}
+
+	w, err := r.Worktree()
+	if err != nil {
+		log.Print(err)
+	}
+	head, err := r.Head()
+	if err != nil {
+		log.Print(err)
+	}
+
+	commit := plumbing.NewHash(head.Hash().String())
+
+	err = w.Reset(&git.ResetOptions{
+		Mode:   git.HardReset,
+		Commit: commit,
+	})
+	if err != nil {
+		log.Print(err)
+	}
+
+	err = w.Pull(&git.PullOptions{RemoteName: "origin", Progress: os.Stdout})
+	if err != nil {
+		log.Print(err)
+	}
+}
+func dockerImageUpdate() {
+	command := command.Command{}
+	for _, service := range dockerEnvironmentManager.ActiveServicesList {
+		if service.Image != "" {
+			log.Println("docker pull", service.Image)
+			command.RunWithPipe("docker", "pull", service.Image)
+		}
+	}
+}
+
 func selfUpdate() {
-	arch := make(map[string]string)
-	arch["386"] = "i386"
-	arch["amd64"] = "x86_64"
-	arch["arm64"] = "arm64"
 
-	goos := make(map[string]string)
-	goos["darwin"] = "Darwin"
-	goos["linux"] = "Linux"
-	goos["windows"] = "Windows"
-
-	log.Println("https://github.com/mindwars/redock/releases/latest/download/redock_"+goos[runtime.GOOS]+"_"+arch[runtime.GOARCH], "downloading...")
+	log.Println("https://github.com/mindwars/redock/releases/latest/download/redock_"+runtime.GOOS+"_"+runtime.GOARCH, "downloading...")
 
 	var updater = &selfupdate.Updater{
 		CurrentVersion: "v1.0.0",
-		BinURL:         "https://github.com/mindwars/redock/releases/latest/download/redock_" + goos[runtime.GOOS] + "_" + arch[runtime.GOARCH],
+		BinURL:         "https://github.com/mindwars/redock/releases/latest/download/redock_" + runtime.GOOS + "_" + runtime.GOARCH,
 		Dir:            "update/",
 		CmdName:        "/docker-env",
 	}
