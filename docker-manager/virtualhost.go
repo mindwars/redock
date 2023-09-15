@@ -51,6 +51,20 @@ var nginx = `server {
     }
 }`
 
+var nginxProxy = `server {
+    server_name $domain;
+	index index.html index.php;
+
+    location / {
+        proxy_pass http://$ipAddress:$proxyPassPort;
+    }
+
+    location ~ /files {
+        deny all;
+        return 404;
+    }
+}`
+
 var httpd = `<VirtualHost *:80>
     ProxyPassMatch ^/(.*\.php(/.*)?)$ fcgi://$phpversion:9000/var/www/html/$folder/$1
     DirectoryIndex /index.php index.php
@@ -69,15 +83,15 @@ type VirtualHost struct {
 	manager *DockerEnvironmentManager
 }
 
-func (t *VirtualHost) createConfig(service, domain, folder, phpVersion string) {
+func (t *VirtualHost) createConfig(service, domain, folder, phpVersion, typeConf, proxyPassPort string) {
 	if service == "nginx" {
-		t.createNginxConfig(domain, folder, phpVersion)
+		t.createNginxConfig(domain, folder, phpVersion, typeConf, proxyPassPort)
 	} else {
 		t.createHttpdConfig(domain, folder, phpVersion)
 	}
 }
 
-func (t *VirtualHost) AddVirtualHost(service, domain, folder, phpVersion string) {
+func (t *VirtualHost) AddVirtualHost(service, domain, folder, phpVersion, typeConf, proxyPassPort string, addHosts bool) {
 	var process string
 	confPath := t.GetConfigPath(service)
 	if t.checkFile(confPath + "/" + domain + ".conf") {
@@ -102,9 +116,15 @@ func (t *VirtualHost) AddVirtualHost(service, domain, folder, phpVersion string)
 		}
 	}
 
-	t.createConfig(service, domain, folder, phpVersion)
+	if t.manager.DevEnv {
+		folder = t.manager.Username + "/" + folder
+	}
+
+	t.createConfig(service, domain, folder, phpVersion, typeConf, proxyPassPort)
 	t.manager.Restart(service)
-	t.addHosts(domain)
+	if addHosts {
+		t.addHosts(domain)
+	}
 }
 
 func (t *VirtualHost) FindInHosts(domain string) bool {
@@ -127,11 +147,16 @@ func (t *VirtualHost) checkFile(s string) bool {
 	return true
 }
 
-func (t *VirtualHost) createNginxConfig(domain string, folder string, version string) {
+func (t *VirtualHost) createNginxConfig(domain string, folder string, version string, typeConf, proxyPassPort string) {
 	nginxConf := nginx
+	if typeConf != "Default" {
+		nginxConf = nginxProxy
+	}
 	nginxConf = strings.ReplaceAll(nginxConf, "$domain", domain)
 	nginxConf = strings.ReplaceAll(nginxConf, "$folder", folder)
 	nginxConf = strings.ReplaceAll(nginxConf, "$phpversion", version)
+	nginxConf = strings.ReplaceAll(nginxConf, "$ipAddress", t.manager.getLocalIP())
+	nginxConf = strings.ReplaceAll(nginxConf, "$proxyPassPort", proxyPassPort)
 	err := ioutil.WriteFile(t.GetConfigPath("nginx")+"/"+domain+".conf", []byte(nginxConf), 0644)
 	if err != nil {
 		log.Println(err)
@@ -161,7 +186,12 @@ func (t *VirtualHost) createHttpdConfig(domain string, folder string, version st
 }
 
 func (t *VirtualHost) addHosts(domain string) {
-	cmd := exec.Command("sudo", "bash", "-c", `echo "127.0.0.1 `+domain+`" >> /etc/hosts`)
+	var cmd *exec.Cmd
+	if t.manager.DevEnv {
+		cmd = exec.Command("bash", "-c", `echo "127.0.0.1 `+domain+`" >> /etc/hosts`)
+	} else {
+		cmd = exec.Command("sudo", "bash", "-c", `echo "127.0.0.1 `+domain+`" >> /etc/hosts`)
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

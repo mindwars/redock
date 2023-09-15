@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/AlecAivazis/survey/v2"
 	"log"
 )
 
@@ -56,7 +57,17 @@ func selectProcess() {
 
 func selectPhpServices() string {
 	var phpService string
-	selectBox := &survey.Select{Message: "Pick your service", Options: []string{"php56", "php70", "php71", "php72", "php74", "php81", "php82", "php56_xdebug", "php72_xdebug", "php74_xdebug"}}
+	selectBox := &survey.Select{Message: "Pick your service", Options: []string{"php56", "php70", "php71", "php72", "php74", "php56_xdebug", "php72_xdebug", "php74_xdebug", "php81_xdebug", "php82"}}
+	err := survey.AskOne(selectBox, &phpService)
+	if err != nil {
+		log.Println(err)
+	}
+	return phpService
+}
+
+func selectTypeConf() string {
+	var phpService string
+	selectBox := &survey.Select{Message: "Pick your type", Options: []string{"Default", "Proxy Pass"}}
 	err := survey.AskOne(selectBox, &phpService)
 	if err != nil {
 		log.Println(err)
@@ -78,4 +89,14 @@ func allServices() string {
 		log.Println(err)
 	}
 	return service
+}
+
+func ask(message string) string {
+	var response string
+	inputBox := &survey.Input{Message: message}
+	err := survey.AskOne(inputBox, &response)
+	if err != nil {
+		log.Println(err)
+	}
+	return response
 }
