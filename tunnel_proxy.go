@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/AlecAivazis/survey/v2"
+	survey "github.com/AlecAivazis/survey/v2"
 	tunnel "github.com/onuragtas/tunnel-client"
 	"github.com/onuragtas/tunnel-client/models"
 	"github.com/onuragtas/tunnel-client/utils"
@@ -85,6 +85,9 @@ func closeTunnel() {
 func startTunnel() {
 	domainList := client.ListDomain().Data.Domains
 	selectedList := listDomains(true)
+	sshUser := ask("SSH User:")
+	sshPassword := ask("SSH Password:")
+
 	var tunnels []models.Tunnel
 	for _, selected := range selectedList {
 

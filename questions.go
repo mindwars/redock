@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/AlecAivazis/survey/v2"
+	survey "github.com/AlecAivazis/survey/v2"
 	"log"
 )
 
@@ -57,7 +57,7 @@ func selectProcess() {
 
 func selectPhpServices() string {
 	var phpService string
-	selectBox := &survey.Select{Message: "Pick your service", Options: []string{"php56", "php70", "php71", "php72", "php74", "php56_xdebug", "php72_xdebug", "php74_xdebug", "php81_xdebug", "php82"}}
+	selectBox := &survey.Select{Message: "Pick your service", Options: []string{"php56", "php70", "php71", "php72", "php73", "php74", "php56_xdebug", "php72_xdebug", "php74_xdebug", "php81_xdebug", "php82"}}
 	err := survey.AskOne(selectBox, &phpService)
 	if err != nil {
 		log.Println(err)
