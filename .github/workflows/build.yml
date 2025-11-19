@@ -1,38 +1,113 @@
 # This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
 
-name: Node.js CI
+name: Redock CI
 
 on:
   push:
     branches:
-      - "!*"
+      - master
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      auto_increment:
+        description: "Increment patch version from previous tag"
+        required: false
+        default: "true"
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      CHECKOUT_REF: ${{ github.event_name == 'workflow_dispatch' && 'master' || github.ref }}
+      RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GO_RELEASER_GITHUB_TOKEN }}
+          ref: ${{ env.CHECKOUT_REF }}
+          fetch-depth: 0
+
+      - name: Determine next version
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+        env:
+          AUTO_INCREMENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.auto_increment || 'true' }}
+        run: |
+          if [ "$AUTO_INCREMENT" = "true" ]; then
+            git fetch --tags
+            LAST_TAG=""
+            while IFS= read -r TAG; do
+              if [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                LAST_TAG="$TAG"
+                break
+              fi
+            done < <(git tag --list 'v*' --sort=-version:refname)
+            if [ -z "$LAST_TAG" ]; then
+              RELEASE_TAG="v1.0.0"
+            elif [[ "$LAST_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              MAJOR=${BASH_REMATCH[1]}
+              MINOR=${BASH_REMATCH[2]}
+              PATCH=${BASH_REMATCH[3]}
+              PATCH=$((PATCH + 1))
+              RELEASE_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+            else
+              echo "Unsupported tag format: $LAST_TAG. Please enter a valid version."
+              exit 1
+            fi
+          else
+            echo "Automatic increment is disabled but manual version input is not defined."
+            exit 1
+          fi
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([\-+][0-9A-Za-z\.-]+)?$ ]]; then
+            echo "Invalid version: $RELEASE_TAG. Example format: v1.2.3 or v1.2.3-hotfix1"
+            exit 1
+          fi
+
+          echo "Selected version: $RELEASE_TAG"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+
+      - name: Create tag and push
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          git fetch --tags
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists. Please select a new version."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          CURRENT_SHA=$(git rev-parse HEAD)
+          echo "Tagging $CURRENT_SHA with $RELEASE_TAG"
+          git tag "$RELEASE_TAG" "$CURRENT_SHA"
+          git push origin "$RELEASE_TAG"
 
       - name: Build with Node.js
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/setup-node@v3
         with:
           node-version: 19
-      - run: |
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: |
           cd web
           npm install
           npm run build
 
       - name: Setup Go
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/setup-go@v4
         with:
           go-version: 1.21
 
       - name: Create Config
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           USER: ${{ secrets.USER }}
           PASSWORD: ${{ secrets.PASSWORD }}
@@ -47,12 +122,12 @@ jobs:
           cat tunnel_proxy/account.go
         shell: bash
 
-
       - name: Create version
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           cat <<EOF > app_version.go
           package main
-          var version = "${{ github.ref_name }}"
+          var version = "$RELEASE_TAG"
           EOF
 
           echo "cat app_version.go"
@@ -60,9 +135,11 @@ jobs:
         shell: bash
 
       - name: Build
+        if: startsWith(github.ref, 'refs/tags/')
         run: go build -v ./...
 
       - name: Run goreleaser/goreleaser-action@v5
+        if: startsWith(github.ref, 'refs/tags/')
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser
